@@ -18,7 +18,7 @@ central-hub.firestore.rules ফাইলের লেখা Firebase Console →
 
 ## শিক্ষার্থীদের ফলাফল
 1. results-project.rules-addition.txt অনুযায়ী pzs-93c0b-এর Rules-এ ৩ লাইন যোগ করুন।
-2. result-portal-addon/publish.js ফলাফল পোর্টালের index.html-এর পাশে রাখুন এবং qpaper.js-এর পরে `<script src="publish.js"></script>` যোগ করুন।
+2. publish.js ফাইলটি ফলাফল পোর্টালের রিপোজিটরিতে (Panipur-Zila-school) index.html-এর পাশে রাখুন (এই প্রজেক্টে নয়)।
 3. পোর্টালের "এক নজরে" ট্যাবে "শিক্ষার্থীদের জন্য প্রকাশ" চাপুন।
 
 ## নোট

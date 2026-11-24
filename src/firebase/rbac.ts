@@ -90,7 +90,9 @@ const centralFirebaseConfig = {
   appId: import.meta.env.VITE_CENTRAL_FIREBASE_APP_ID || "",
 };
 
-const centralApp = getApps().some((a) => a.name === "[DEFAULT]") ? getApp() : initializeApp(centralFirebaseConfig);
+const centralApp = getApps().some((a) => a.name === "[DEFAULT]")
+  ? getApp()
+  : initializeApp(centralFirebaseConfig);
 export const centralAuth = getAuth(centralApp);
 export const centralDb = getFirestore(centralApp);
 

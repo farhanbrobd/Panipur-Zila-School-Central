@@ -10,6 +10,8 @@ import {
   Info, Layers, HelpCircle, Send, ChevronRight
 } from 'lucide-react';
 import { ResultLookup } from './components/ResultLookup';
+import { ImageUploadField } from './components/ImageUploadField';
+import { fetchSchoolMeta } from './firebase/results';
 import { OnlineServicesSection } from './components/OnlineServicesSection';
 import { CentralAdminPanel } from './components/CentralAdminPanel';
 import { FirebaseAdminLogin, ADMIN_ROLES } from './components/FirebaseAdminLogin';
@@ -266,7 +268,7 @@ const INITIAL_SITE_DATA = {
   settings: {
     schoolNameBn: 'পানিপুর জেলা স্কুল',
     schoolNameEn: 'Panipur Zila School',
-    taglineBn: 'জ্ঞান, শৃঙ্খলা ও নৈতিকতার আলোকবর্তিকা',
+    taglineBn: 'একটি মনতেশ্বরী শিক্ষা প্রতিষ্ঠান',
     taglineEn: 'Beacon of Knowledge, Discipline & Morality',
     eiin: '[EIIN নম্বর যুক্ত করুন]',
     estd: '[স্থাপিত সাল]',
@@ -486,6 +488,17 @@ export default function SchoolSite() {
       .then((remote) => {
         if (remote) setSiteData((prev) => ({ ...prev, ...remote }));
       })
+      .catch(() => {})
+      .then(() => fetchSchoolMeta())
+      .then((m) => {
+        if (!m) return;
+        // ফলাফল পোর্টালের শিক্ষার্থী সংখ্যা স্বয়ংক্রিয়ভাবে হোম পেজের পরিসংখ্যানে আসে
+        const total = Object.values(m.counts || {}).reduce((a, b) => a + Number(b || 0), 0);
+        if (total > 0) {
+          const shown = String(total).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
+          setSiteData((prev) => ({ ...prev, settings: { ...prev.settings, statStudents: shown } }));
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -569,7 +582,6 @@ export default function SchoolSite() {
       { id: 'headmaster', label: t.navHeadmaster },
       { id: 'mission', label: t.navMission },
       { id: 'teachers', label: t.navTeachers },
-      { id: 'students', label: t.navStudents },
       { id: 'academic-info', label: t.navAcademicInfo },
       { id: 'class-routine', label: t.navClassRoutine },
       { id: 'exam-routine', label: t.navExamRoutine },
@@ -2967,7 +2979,6 @@ function AdminDashboard({
     { id: 'teachers', label: lang === 'bn' ? 'শিক্ষক ও কর্মচারী' : 'Teachers & Staff', icon: Users },
     { id: 'students', label: lang === 'bn' ? 'শিক্ষার্থী রেকর্ড (সুরক্ষিত)' : 'Students (Protected)', icon: GraduationCap },
     { id: 'routines', label: lang === 'bn' ? 'ক্লাস ও পরীক্ষার রুটিন' : 'Class & Exam Routines', icon: Calendar },
-    { id: 'results', label: lang === 'bn' ? 'পরীক্ষার ফলাফল প্রকাশ' : 'Publish Exam Results', icon: Award },
     { id: 'gallery', label: lang === 'bn' ? 'ছবি ও ভিডিও গ্যালারি' : 'Photo & Video Gallery', icon: ImageIcon },
     { id: 'settings', label: lang === 'bn' ? 'ওয়েবসাইট কন্টেন্ট ও সেটিংস' : 'Site Content & Settings', icon: Building2 },
   ];
@@ -3351,6 +3362,16 @@ function AdminNewsManager({ lang, siteData, setSiteData, showToast }) {
 
   return (
     <div className="space-y-6">
+      <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-emerald-900 max-w-xl">
+          {lang === 'bn'
+            ? 'ফলাফল পোর্টালে দেওয়া প্রধান শিক্ষক, সহকারী প্রধান শিক্ষক ও শ্রেণি শিক্ষকদের নাম এখানে আনুন। এরপর শুধু ছবি ও বিস্তারিত যোগ করলেই হবে।'
+            : 'Import the headmaster, assistant headmaster and class teachers entered in the result portal, then just add photos and details.'}
+        </p>
+        <button type="button" onClick={importFromPortal} className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl">
+          {lang === 'bn' ? 'ফলাফল পোর্টাল থেকে আনুন' : 'Import from Result Portal'}
+        </button>
+      </div>
       <form onSubmit={handleAdd} className="bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
         <h3 className="font-bold text-lg text-[#0F2942]">
           {lang === 'bn' ? 'নতুন সংবাদ ও ইভেন্ট যুক্ত করুন' : 'Add News & Event'}
@@ -3378,13 +3399,7 @@ function AdminNewsManager({ lang, siteData, setSiteData, showToast }) {
             onChange={(e) => setDate(e.target.value)}
             className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm"
           />
-          <input
-            type="url"
-            placeholder="Image URL (Optional)"
-            value={imageUrl}
-            onChange={(e) => setImageUrl(e.target.value)}
-            className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm"
-          />
+          <ImageUploadField label={lang === 'bn' ? 'সংবাদের ছবি (ঐচ্ছিক)' : 'News Image (Optional)'} value={imageUrl} onChange={setImageUrl} maxDim={900} quality={0.72} />
         </div>
         <textarea
           rows="3"
@@ -3432,6 +3447,50 @@ function AdminTeachersManager({ lang, siteData, setSiteData, showToast }) {
   const [contact, setContact] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
 
+  const importFromPortal = async () => {
+    try {
+      const m = await fetchSchoolMeta();
+      if (!m) {
+        showToast(lang === 'bn' ? 'পোর্টালে এখনো তথ্য প্রকাশিত হয়নি। ফলাফল পোর্টালে একবার লগইন করুন।' : 'No data from the result portal yet. Log in there once.', 'error');
+        return;
+      }
+      const bnD = (v) => String(v).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
+      const have = new Set(siteData.teachers.map((x) => (x.nameBn || '').trim()));
+      const byName = new Map();
+      const note = (name, key) => {
+        const n = (name || '').trim();
+        if (!n || have.has(n)) return;
+        if (!byName.has(n)) byName.set(n, { head: false, asst: false, classes: [] });
+        const o = byName.get(n);
+        if (key === 'head') o.head = true;
+        else if (key === 'asst') o.asst = true;
+        else o.classes.push(key);
+      };
+      note(m.head, 'head');
+      note(m.asst, 'asst');
+      Object.keys(m.classTeachers || {}).sort((a, b) => Number(a) - Number(b)).forEach((c) => note(m.classTeachers[c].name, c));
+      const added = [];
+      byName.forEach((o, n) => {
+        const bnParts = [];
+        const enParts = [];
+        if (o.head) { bnParts.push('প্রধান শিক্ষক'); enParts.push('Headmaster'); }
+        if (o.asst) { bnParts.push('সহকারী প্রধান শিক্ষক'); enParts.push('Assistant Headmaster'); }
+        if (o.classes.length) {
+          bnParts.push('শ্রেণি শিক্ষক – শ্রেণি ' + o.classes.map(bnD).join(', '));
+          enParts.push('Class Teacher – Class ' + o.classes.join(', '));
+        }
+        added.push({ id: `teacher-${Date.now()}-${added.length}`, nameBn: n, nameEn: n, designationBn: bnParts.join(' ও '), designationEn: enParts.join(' & '), qualification: '', subject: '', contact: '', photoUrl: '', source: 'portal' });
+      });
+      const s = { ...siteData.settings };
+      if (m.eiin && String(s.eiin || '').startsWith('[')) s.eiin = m.eiin;
+      if (m.head && String(s.headmasterNameBn || '').startsWith('[')) s.headmasterNameBn = m.head;
+      setSiteData({ ...siteData, settings: s, teachers: [...siteData.teachers, ...added] });
+      showToast(lang === 'bn' ? `ফলাফল পোর্টাল থেকে ${bnD(added.length)} জন যুক্ত হয়েছে। এবার ছবি ও বিস্তারিত যোগ করুন।` : `${added.length} imported from the result portal. Now add photos and details.`);
+    } catch {
+      showToast(lang === 'bn' ? 'পোর্টাল থেকে তথ্য আনা যায়নি' : 'Could not import from the portal', 'error');
+    }
+  };
+
   const handleAdd = (e) => {
     e.preventDefault();
     const teacher = {
@@ -3471,7 +3530,7 @@ function AdminTeachersManager({ lang, siteData, setSiteData, showToast }) {
           <input type="text" required placeholder="শিক্ষাগত যোগ্যতা (Qualification)" value={qualification} onChange={(e) => setQualification(e.target.value)} className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
           <input type="text" required placeholder="পাঠদানের বিষয় (Subject)" value={subject} onChange={(e) => setSubject(e.target.value)} className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
           <input type="text" required placeholder="যোগাযোগের নম্বর / ইমেইল" value={contact} onChange={(e) => setContact(e.target.value)} className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
-          <input type="url" placeholder="ছবির লিংক (Photo URL - Optional)" value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
+          <ImageUploadField label={lang === 'bn' ? 'শিক্ষকের ছবি' : 'Teacher Photo'} value={photoUrl} onChange={setPhotoUrl} maxDim={360} className="sm:col-span-2" />
         </div>
         <button type="submit" className="bg-emerald-600 text-white text-xs font-bold px-5 py-2.5 rounded-xl">
           Save Teacher Profile
@@ -3858,6 +3917,10 @@ function AdminGalleryManager({ lang, siteData, setSiteData, showToast }) {
 
   const handleAddPhoto = (e) => {
     e.preventDefault();
+    if (!photoUrl) {
+      showToast(lang === 'bn' ? 'আগে একটি ছবি বাছুন' : 'Please choose a photo first', 'error');
+      return;
+    }
     const item = {
       id: `photo-${Date.now()}`,
       url: photoUrl,
@@ -3895,7 +3958,7 @@ function AdminGalleryManager({ lang, siteData, setSiteData, showToast }) {
           {lang === 'bn' ? 'ফটো গ্যালারিতে ছবি যুক্ত করুন' : 'Add Photo to Gallery'}
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <input type="url" required placeholder="Image URL (https://...)" value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
+          <ImageUploadField label={lang === 'bn' ? 'গ্যালারির ছবি' : 'Gallery Photo'} value={photoUrl} onChange={setPhotoUrl} maxDim={900} quality={0.72} />
           <input type="text" required placeholder="ক্যাপশন (বাংলা)" value={captionBn} onChange={(e) => setCaptionBn(e.target.value)} className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
           <input type="text" placeholder="Caption (English)" value={captionEn} onChange={(e) => setCaptionEn(e.target.value)} className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
         </div>
@@ -3962,6 +4025,14 @@ function AdminSettingsManager({ lang, siteData, setSiteData, showToast }) {
           <input type="text" value={form.schoolNameEn} onChange={(e) => handleChange('schoolNameEn', e.target.value)} className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
         </div>
         <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1">স্লোগান (বাংলা)</label>
+          <input type="text" value={form.taglineBn || ''} onChange={(e) => handleChange('taglineBn', e.target.value)} className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1">Slogan (English)</label>
+          <input type="text" value={form.taglineEn || ''} onChange={(e) => handleChange('taglineEn', e.target.value)} className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
+        </div>
+        <div>
           <label className="block text-xs font-bold text-slate-700 mb-1">EIIN Number</label>
           <input type="text" value={form.eiin} onChange={(e) => handleChange('eiin', e.target.value)} className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
         </div>
@@ -3970,12 +4041,10 @@ function AdminSettingsManager({ lang, siteData, setSiteData, showToast }) {
           <input type="text" value={form.estd} onChange={(e) => handleChange('estd', e.target.value)} className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
         </div>
         <div>
-          <label className="block text-xs font-bold text-slate-700 mb-1">Custom Logo URL (Optional)</label>
-          <input type="url" value={form.logoUrl} onChange={(e) => handleChange('logoUrl', e.target.value)} className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
+          <ImageUploadField label={lang === 'bn' ? 'স্কুলের লোগো (ঐচ্ছিক)' : 'School Logo (Optional)'} value={form.logoUrl} onChange={(v) => handleChange('logoUrl', v)} maxDim={256} quality={0.9} />
         </div>
         <div>
-          <label className="block text-xs font-bold text-slate-700 mb-1">Hero Banner Image URL (Optional)</label>
-          <input type="url" value={form.bannerUrl} onChange={(e) => handleChange('bannerUrl', e.target.value)} className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
+          <ImageUploadField label={lang === 'bn' ? 'হোম পেজের ব্যানার ছবি (ঐচ্ছিক)' : 'Hero Banner Image (Optional)'} value={form.bannerUrl} onChange={(v) => handleChange('bannerUrl', v)} maxDim={1400} quality={0.7} />
         </div>
       </div>
 
@@ -3986,7 +4055,7 @@ function AdminSettingsManager({ lang, siteData, setSiteData, showToast }) {
           <input type="text" placeholder="প্রধান শিক্ষকের নাম (বাংলা)" value={form.headmasterNameBn} onChange={(e) => handleChange('headmasterNameBn', e.target.value)} className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
           <input type="text" placeholder="Headmaster Name (English)" value={form.headmasterNameEn} onChange={(e) => handleChange('headmasterNameEn', e.target.value)} className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
           <input type="text" placeholder="Qualification" value={form.headmasterQualification} onChange={(e) => handleChange('headmasterQualification', e.target.value)} className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
-          <input type="url" placeholder="Headmaster Photo URL" value={form.headmasterPhoto} onChange={(e) => handleChange('headmasterPhoto', e.target.value)} className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
+          <ImageUploadField label={lang === 'bn' ? 'প্রধান শিক্ষকের ছবি' : 'Headmaster Photo'} value={form.headmasterPhoto} onChange={(v) => handleChange('headmasterPhoto', v)} maxDim={360} />
         </div>
         <textarea rows="3" placeholder="প্রধান শিক্ষকের বাণী (বাংলা)" value={form.headmasterMessageBn} onChange={(e) => handleChange('headmasterMessageBn', e.target.value)} className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
         <textarea rows="2" placeholder="Headmaster Message (English)" value={form.headmasterMessageEn} onChange={(e) => handleChange('headmasterMessageEn', e.target.value)} className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />

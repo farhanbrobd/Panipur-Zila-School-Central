@@ -101,3 +101,23 @@ export async function fetchPublishedResult(
   const snap = await getDoc(doc(resultsDb, "publishedResults", id));
   return snap.exists() ? (snap.data() as PublishedResult) : null;
 }
+
+export interface SchoolMeta {
+  school: string;
+  slogan: string;
+  addr: string;
+  eiin: string;
+  upazila: string;
+  district: string;
+  head: string;
+  asst: string;
+  year: string;
+  classTeachers: Record<string, { name: string }>;
+  counts: Record<string, number>;
+}
+
+/* ফলাফল পোর্টাল নিজে থেকে যে স্কুল-তথ্য প্রকাশ করে (স্বাক্ষর, মোবাইল ও শিক্ষার্থীর নাম বাদে) */
+export async function fetchSchoolMeta(): Promise<SchoolMeta | null> {
+  const snap = await getDoc(doc(resultsDb, "publishedMeta", "school"));
+  return snap.exists() ? (snap.data() as SchoolMeta) : null;
+}
