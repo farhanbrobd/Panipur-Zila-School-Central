@@ -30,6 +30,14 @@ export async function fetchSiteContent(): Promise<Record<string, unknown> | null
   }
 }
 
+export function publicJson(data: Record<string, unknown>): string {
+  const pub: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (!PRIVATE_KEYS.includes(k)) pub[k] = v;
+  }
+  return JSON.stringify(pub);
+}
+
 export async function saveSiteContent(data: Record<string, unknown>): Promise<void> {
   const pub: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {

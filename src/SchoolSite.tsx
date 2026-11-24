@@ -12,11 +12,14 @@ import {
 import { ResultLookup } from './components/ResultLookup';
 import { ImageUploadField } from './components/ImageUploadField';
 import { fetchSchoolMeta } from './firebase/results';
+import { fetchAdmissionData } from './firebase/admission';
+import { AssistantHeadmasterSection } from './components/AssistantHeadmasterSection';
+import { SystemCheck } from './components/SystemCheck';
 import { OnlineServicesSection } from './components/OnlineServicesSection';
 import { CentralAdminPanel } from './components/CentralAdminPanel';
 import { FirebaseAdminLogin, ADMIN_ROLES } from './components/FirebaseAdminLogin';
 import { observeAuthProfile, logoutUser } from './firebase/rbac';
-import { fetchSiteContent, saveSiteContent } from './firebase/siteContent';
+import { fetchSiteContent, saveSiteContent, publicJson } from './firebase/siteContent';
 
 // ============================================================================
 // BILINGUAL DICTIONARY & TRANSLATIONS (বাংলা / English)
@@ -292,6 +295,12 @@ const INITIAL_SITE_DATA = {
     headmasterNameEn: '[Add Headmaster Name]',
     headmasterQualification: '[শিক্ষাগত যোগ্যতা যুক্ত করুন, যেমন: এম.এসসি, বি.এড]',
     headmasterPhoto: '',
+    asstNameBn: '',
+    asstNameEn: '',
+    asstQualification: '',
+    asstPhoto: '',
+    asstMessageBn: '',
+    asstMessageEn: '',
     headmasterMessageBn: '[প্রধান শিক্ষকের শুভেচ্ছা বার্তা এখানে যুক্ত করুন। শিক্ষার্থী, অভিভাবক এবং শিক্ষকদের উদ্দেশ্যে দিকনির্দেশনামূলক বাণী অ্যাডমিন প্যানেল থেকে হালনাগাদ করুন।]',
     headmasterMessageEn: '[Add Headmaster’s welcome message here. Update the guiding message for students, guardians, and teachers from the Admin Panel.]',
     // Mission & Vision
@@ -483,12 +492,25 @@ export default function SchoolSite() {
     return () => unsub();
   }, []);
 
+  const [remoteReady, setRemoteReady] = useState(false);
+  const [syncStatus, setSyncStatus] = useState({ state: 'idle', msg: '' });
+  const lastSaved = React.useRef(null);
+
   useEffect(() => {
     fetchSiteContent()
       .then((remote) => {
-        if (remote) setSiteData((prev) => ({ ...prev, ...remote }));
+        if (remote) {
+          setSiteData((prev) => {
+            const next = { ...prev, ...remote };
+            lastSaved.current = publicJson(next);
+            return next;
+          });
+        }
+        setRemoteReady(true);
       })
-      .catch(() => {})
+      .catch((e) => {
+        setSyncStatus({ state: 'error', msg: (e && e.code) || 'পড়া যায়নি' });
+      })
       .then(() => fetchSchoolMeta())
       .then((m) => {
         if (!m) return;
@@ -501,6 +523,28 @@ export default function SchoolSite() {
       })
       .catch(() => {});
   }, []);
+
+  // অ্যাডমিন লগইন থাকলে প্রতিটি পরিবর্তন নিজে থেকে ক্লাউডে সংরক্ষিত হয় (সব ডিভাইসে যায়)
+  useEffect(() => {
+    if (!isAdminAuthenticated || !remoteReady) return;
+    const json = publicJson(siteData);
+    if (lastSaved.current === null) {
+      lastSaved.current = json;
+      return;
+    }
+    if (json === lastSaved.current) return;
+    setSyncStatus({ state: 'saving', msg: '' });
+    const id = setTimeout(async () => {
+      try {
+        await saveSiteContent(siteData);
+        lastSaved.current = json;
+        setSyncStatus({ state: 'saved', msg: new Date().toLocaleTimeString('bn-BD') });
+      } catch (e) {
+        setSyncStatus({ state: 'error', msg: (e && e.code) || (e && e.message) || 'error' });
+      }
+    }, 1500);
+    return () => clearTimeout(id);
+  }, [siteData, isAdminAuthenticated, remoteReady]);
 
   // UI Helper States
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -526,9 +570,13 @@ export default function SchoolSite() {
   const handlePublish = async () => {
     try {
       await saveSiteContent(siteData);
-      showToast(lang === 'bn' ? 'লাইভ ওয়েবসাইটে প্রকাশ হয়েছে!' : 'Published to the live website!');
-    } catch {
-      showToast(lang === 'bn' ? 'প্রকাশ ব্যর্থ: অনুমতি বা ইন্টারনেট সমস্যা।' : 'Publish failed: permission or network issue.', 'error');
+      lastSaved.current = publicJson(siteData);
+      setSyncStatus({ state: 'saved', msg: new Date().toLocaleTimeString('bn-BD') });
+      showToast(lang === 'bn' ? 'ক্লাউডে সংরক্ষিত হয়েছে — সব ডিভাইসে দেখা যাবে!' : 'Saved to the cloud — visible on all devices!');
+    } catch (e) {
+      const c = (e && e.code) || (e && e.message) || 'error';
+      setSyncStatus({ state: 'error', msg: c });
+      showToast((lang === 'bn' ? 'সংরক্ষণ হয়নি: ' : 'Save failed: ') + c, 'error');
     }
   };
 
@@ -645,6 +693,7 @@ export default function SchoolSite() {
         onBackToSite={() => navigateTo('home')}
         showToast={showToast}
         onPublish={handlePublish}
+        syncStatus={syncStatus}
         onOpenRoles={() => navigateTo('central-admin')}
       />
     );
@@ -1000,6 +1049,7 @@ export default function SchoolSite() {
             setSelectedNews={setSelectedNews}
             setSelectedPhoto={setSelectedPhoto}
           />
+            <AssistantHeadmasterSection lang={lang} settings={siteData.settings} />
             <OnlineServicesSection lang={lang} navigateTo={navigateTo} />
           </>
         )}
@@ -1031,7 +1081,10 @@ export default function SchoolSite() {
         )}
 
         {activePage === 'headmaster' && (
-          <HeadmasterPage lang={lang} t={t} settings={siteData.settings} />
+          <>
+            <HeadmasterPage lang={lang} t={t} settings={siteData.settings} />
+            <AssistantHeadmasterSection lang={lang} settings={siteData.settings} />
+          </>
         )}
 
         {activePage === 'mission' && (
@@ -2968,7 +3021,8 @@ function AdminDashboard({
   onBackToSite,
   showToast,
   onPublish,
-  onOpenRoles
+  onOpenRoles,
+  syncStatus
 }) {
   const [tab, setTab] = useState('overview');
 
@@ -2981,6 +3035,7 @@ function AdminDashboard({
     { id: 'routines', label: lang === 'bn' ? 'ক্লাস ও পরীক্ষার রুটিন' : 'Class & Exam Routines', icon: Calendar },
     { id: 'gallery', label: lang === 'bn' ? 'ছবি ও ভিডিও গ্যালারি' : 'Photo & Video Gallery', icon: ImageIcon },
     { id: 'settings', label: lang === 'bn' ? 'ওয়েবসাইট কন্টেন্ট ও সেটিংস' : 'Site Content & Settings', icon: Building2 },
+    { id: 'system', label: lang === 'bn' ? 'সিস্টেম স্ট্যাটাস' : 'System Status', icon: Layers },
   ];
 
   // Export JSON Backup
@@ -3006,7 +3061,7 @@ function AdminDashboard({
               {lang === 'bn' ? 'অ্যাডমিন কন্ট্রোল প্যানেল — পানিপুর জেলা স্কুল' : 'Admin Control Panel — Panipur Zila School'}
             </h1>
             <p className="text-[11px] text-emerald-300">
-              {lang === 'bn' ? 'পরিবর্তন শেষে "লাইভে প্রকাশ করুন" চাপুন' : 'After editing, press "Publish to Live"'}
+              {lang === 'bn' ? 'পরিবর্তন নিজে থেকেই ক্লাউডে সংরক্ষিত হয় (সব ডিভাইসে যায়)' : 'Changes are saved to the cloud automatically'}
             </p>
           </div>
         </div>
@@ -3018,11 +3073,18 @@ function AdminDashboard({
           >
             {lang === 'bn' ? 'English' : 'বাংলা'}
           </button>
+          {syncStatus && syncStatus.state !== 'idle' && (
+            <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg ${syncStatus.state === 'error' ? 'bg-rose-500/90 text-white' : 'bg-white/15 text-emerald-200'}`}>
+              {syncStatus.state === 'saving' && '☁ সংরক্ষণ হচ্ছে…'}
+              {syncStatus.state === 'saved' && `☁ সব ডিভাইসে সংরক্ষিত ✓ ${syncStatus.msg}`}
+              {syncStatus.state === 'error' && `⚠ ক্লাউডে সংরক্ষণ হয়নি (${syncStatus.msg}) — সিস্টেম স্ট্যাটাস দেখুন`}
+            </span>
+          )}
           <button
             onClick={onPublish}
             className="bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs font-bold px-3.5 py-1.5 rounded-lg"
           >
-            {lang === 'bn' ? 'লাইভে প্রকাশ করুন' : 'Publish to Live'}
+            {lang === 'bn' ? 'এখনই সংরক্ষণ করুন' : 'Save now'}
           </button>
           <button
             onClick={onOpenRoles}
@@ -3135,6 +3197,8 @@ function AdminDashboard({
           {tab === 'gallery' && (
             <AdminGalleryManager lang={lang} siteData={siteData} setSiteData={setSiteData} showToast={showToast} />
           )}
+
+          {tab === 'system' && <SystemCheck lang={lang} />}
 
           {tab === 'settings' && (
             <AdminSettingsManager lang={lang} siteData={siteData} setSiteData={setSiteData} showToast={showToast} />
@@ -3993,6 +4057,52 @@ function AdminSettingsManager({ lang, siteData, setSiteData, showToast }) {
     setForm({ ...form, [key]: val });
   };
 
+  const importAll = async () => {
+    const next = { ...form };
+    const filled = [];
+    const problems = [];
+    const blank = (v) => !v || String(v).trim().startsWith('[');
+    const put = (k, v, label) => {
+      if (v && blank(next[k])) {
+        next[k] = v;
+        filled.push(label);
+      }
+    };
+    try {
+      const m = await fetchSchoolMeta();
+      if (m) {
+        put('eiin', m.eiin, 'EIIN');
+        put('headmasterNameBn', m.head, 'প্রধান শিক্ষকের নাম');
+        put('asstNameBn', m.asst, 'সহকারী প্রধান শিক্ষকের নাম');
+        put('addressBn', [m.addr, m.upazila, m.district].filter(Boolean).join(', '), 'ঠিকানা');
+      } else problems.push('ফলাফল পোর্টাল এখনো তথ্য পাঠায়নি');
+    } catch (e) {
+      problems.push('ফলাফল পোর্টাল: ' + (e.code || e.message));
+    }
+    try {
+      const a = await fetchAdmissionData();
+      put('headmasterNameBn', a.head.name, 'প্রধান শিক্ষকের নাম');
+      put('headmasterQualification', a.head.desig, 'প্রধান শিক্ষকের পদবি');
+      put('headmasterMessageBn', a.head.text, 'প্রধান শিক্ষকের বাণী');
+      put('headmasterPhoto', a.head.photo, 'প্রধান শিক্ষকের ছবি');
+      put('asstNameBn', a.asst.name, 'সহকারী প্রধান শিক্ষকের নাম');
+      put('asstQualification', a.asst.desig, 'সহকারী প্রধান শিক্ষকের পদবি');
+      put('asstMessageBn', a.asst.text, 'সহকারী প্রধান শিক্ষকের বাণী');
+      put('asstPhoto', a.asst.photo, 'সহকারী প্রধান শিক্ষকের ছবি');
+      put('logoUrl', a.logo, 'লোগো');
+    } catch (e) {
+      problems.push('ভর্তি ওয়েবসাইট: ' + (e.code || e.message));
+    }
+    setForm(next);
+    setSiteData({ ...siteData, settings: next });
+    const uniq = [...new Set(filled)];
+    showToast(
+      (uniq.length ? `আনা হয়েছে (${uniq.length}টি): ${uniq.join(', ')}` : 'নতুন কিছু আনার মতো ফাঁকা ঘর পাওয়া যায়নি') +
+        (problems.length ? ' | সমস্যা: ' + problems.join('; ') : ''),
+      problems.length && !uniq.length ? 'error' : 'success'
+    );
+  };
+
   const handleSave = (e) => {
     e.preventDefault();
     setSiteData({ ...siteData, settings: form });
@@ -4005,6 +4115,16 @@ function AdminSettingsManager({ lang, siteData, setSiteData, showToast }) {
 
   return (
     <form onSubmit={handleSave} className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 space-y-6">
+      <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-emerald-900 max-w-xl">
+          {lang === 'bn'
+            ? 'ফাঁকা ঘরগুলো ভর্তি ওয়েবসাইট (বাণী, ছবি, লোগো) ও ফলাফল পোর্টাল (ঠিকানা, EIIN, শিক্ষকের নাম) থেকে নিজে থেকে ভরে নিন। আপনার লেখা তথ্য বদলানো হয় না।'
+            : 'Fill the empty fields from the admission site (messages, photos, logo) and the result portal (address, EIIN, names). Your own entries are never overwritten.'}
+        </p>
+        <button type="button" onClick={importAll} className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl">
+          {lang === 'bn' ? 'অন্য ওয়েবসাইট থেকে তথ্য আনুন' : 'Import from other sites'}
+        </button>
+      </div>
       <div className="flex items-center justify-between border-b border-slate-100 pb-4">
         <h3 className="font-bold text-xl text-[#0F2942]">
           {lang === 'bn' ? 'ওয়েবসাইট কন্টেন্ট, লোগো, ব্যানার ও যোগাযোগ সম্পাদনা' : 'Edit Site Content, Banner & Contact Info'}
@@ -4059,6 +4179,15 @@ function AdminSettingsManager({ lang, siteData, setSiteData, showToast }) {
         </div>
         <textarea rows="3" placeholder="প্রধান শিক্ষকের বাণী (বাংলা)" value={form.headmasterMessageBn} onChange={(e) => handleChange('headmasterMessageBn', e.target.value)} className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
         <textarea rows="2" placeholder="Headmaster Message (English)" value={form.headmasterMessageEn} onChange={(e) => handleChange('headmasterMessageEn', e.target.value)} className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
+        <h4 className="font-bold text-sm text-[#0F2942] pt-3">{lang === 'bn' ? 'সহকারী প্রধান শিক্ষকের তথ্য ও বাণী' : 'Assistant Headmaster Info & Message'}</h4>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <input type="text" placeholder="সহকারী প্রধান শিক্ষকের নাম (বাংলা)" value={form.asstNameBn || ''} onChange={(e) => handleChange('asstNameBn', e.target.value)} className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
+          <input type="text" placeholder="Assistant Headmaster Name (English)" value={form.asstNameEn || ''} onChange={(e) => handleChange('asstNameEn', e.target.value)} className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
+          <input type="text" placeholder="পদবি / শিক্ষাগত যোগ্যতা" value={form.asstQualification || ''} onChange={(e) => handleChange('asstQualification', e.target.value)} className="border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
+          <ImageUploadField label={lang === 'bn' ? 'সহকারী প্রধান শিক্ষকের ছবি' : 'Assistant Headmaster Photo'} value={form.asstPhoto || ''} onChange={(v) => handleChange('asstPhoto', v)} maxDim={360} />
+        </div>
+        <textarea rows="3" placeholder="সহকারী প্রধান শিক্ষকের বাণী (বাংলা)" value={form.asstMessageBn || ''} onChange={(e) => handleChange('asstMessageBn', e.target.value)} className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
+        <textarea rows="2" placeholder="Assistant Headmaster Message (English)" value={form.asstMessageEn || ''} onChange={(e) => handleChange('asstMessageEn', e.target.value)} className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-sm" />
       </div>
 
       {/* School History & About */}
