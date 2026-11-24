@@ -1,0 +1,36 @@
+// শুধু Firebase প্রজেক্ট `central-hub-pzs`-এর জন্য।
+// Firebase Console → Firestore Database → Rules-এ পেস্ট করে Publish করুন।
+// (ভর্তি বা ফলাফল প্রজেক্টে এটি বসাবেন না।)
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isOwner()  { return signedIn() && request.auth.uid == 'u0n6HtKNJROkXNdhoEpcvAnh2yB2'; }
+    function profile()  { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function isActive() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && profile().active == true;
+    }
+    function canNotice() {
+      return isOwner()
+        || (isActive() && profile().role in ['super_admin', 'headmaster', 'assistant_headmaster']);
+    }
+
+    // ব্যবহারকারীর ভূমিকা: শুধু Super Admin (মালিক) লিখতে পারে; নিজের প্রোফাইল নিজে পড়তে পারে
+    match /users/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isOwner());
+      allow list: if isOwner();
+      allow write: if isOwner();
+    }
+
+    // নোটিশ: সবাই পড়তে পারবে, লিখতে পারবে শুধু অনুমোদিত ভূমিকা
+    match /notices/{id} {
+      allow read: if true;
+      allow create, update, delete: if canNotice();
+    }
+
+    // বাকি সব কালেকশন ডিফল্টভাবে বন্ধ
+  }
+}
